@@ -1,0 +1,87 @@
+# Full ragfoundry configuration with every section. Values shown are the defaults unless marked.
+persist_dir: .ragfoundry
+batch_size: 64
+
+loading:
+  on_error: raise          # raise | skip (skipped sources are listed in the ingest report)
+  encoding: utf-8
+  glob: "**/*"             # which files to take from a directory
+  web:
+    max_depth: 0           # 0 fetches only the given URL
+    max_pages: 50
+    same_domain: true
+    respect_robots: true
+    delay_seconds: 0.5
+
+chunking:
+  strategy: recursive      # fixed | recursive | semantic | llm
+  chunk_size: 1000
+  chunk_overlap: 200
+  length_unit: characters  # characters | tokens
+  semantic:
+    breakpoint_percentile: 95
+    buffer_size: 1
+  llm:
+    window_chars: 8000
+
+embeddings:                # required
+  provider: huggingface    # huggingface | openai | gemini
+  model: sentence-transformers/all-MiniLM-L6-v2
+  # api_key: ${OPENAI_API_KEY}
+
+vector_store:              # required; pick one provider block
+  provider: chroma
+  collection_name: my_docs
+  # chroma:   persist_directory: ./chroma   or   host: localhost, port: 8000
+  # faiss:    path: ./faiss_index
+  # pinecone: index_name: my-index, api_key: ${PINECONE_API_KEY}   (collection_name = namespace)
+  # qdrant:   url: http://localhost:6333, api_key: ...   or   path: ./qdrant
+  # weaviate: url: http://localhost:8080, grpc_port: 50051, api_key: ... (cloud)
+  # milvus:   uri: http://localhost:19530, token: ...    (omit uri for a local Milvus Lite file)
+  # pgvector: connection: postgresql+psycopg://user:pass@localhost:5432/db
+
+llm:                       # required for answers; not needed for ingest-only use
+  provider: ollama         # groq | openai | gemini | claude | ollama
+  model: llama3.2
+  # temperature: 0
+  # max_tokens: 1024
+  # api_key: ${GROQ_API_KEY}
+  # base_url: http://localhost:11434
+  # options: {}           # passed to the LangChain chat model class
+
+retrieval:
+  top_k: 5
+  fetch_k: 20
+  hybrid:
+    enabled: false
+    rrf_k: 60
+    vector_weight: 1.0
+    bm25_weight: 1.0
+  # rerank:
+  #   provider: huggingface              # huggingface | cohere
+  #   model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  query_transform:
+    strategies: []                       # any of: rewrite, multi_query, hyde
+    num_queries: 3
+  corrective:
+    enabled: false
+    max_retries: 1
+    min_relevant_docs: 1
+
+generation:
+  # system_prompt: "..."                 # replaces the default prompt
+  abstain_message: "I don't have enough information in the provided documents to answer."
+
+observability:
+  provider: none                         # none | langsmith | langfuse
+  project: ragfoundry
+  # api_key: ${LANGSMITH_API_KEY}        # LangSmith
+  # public_key: ${LANGFUSE_PUBLIC_KEY}   # Langfuse
+  # secret_key: ${LANGFUSE_SECRET_KEY}   # Langfuse
+  # endpoint: https://cloud.langfuse.com
+  tags: []
+
+evaluation:
+  # llm: {provider: openai, model: ...}  # judge model; defaults to the pipeline llm
+  k_values: [1, 3, 5]
+  max_concurrency: 1
