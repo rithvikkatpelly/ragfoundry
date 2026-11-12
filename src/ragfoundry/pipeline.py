@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -20,6 +20,7 @@ from ._utils import message_text
 from .chunk_store import ChunkStore
 from .chunking import ChunkerResources, build_splitter
 from .config import RAGConfig
+from .context import HistoryInput, TokenCounter, build_token_counter, normalize_history
 from .errors import ConfigurationError, IngestionError
 from .evaluation.dataset import EvalSample, load_dataset
 from .evaluation.runner import EvalReport, Mode, evaluate_pipeline
@@ -28,6 +29,9 @@ from .models import build_chat_model, build_embeddings
 from .observability import Observer, build_observer
 from .retrieval import BM25Index, Reranker, Retriever, build_reranker
 from .vectorstores import VectorIndex, build_vector_index
+
+if TYPE_CHECKING:
+    from .chat import ChatSession
 
 
 @dataclass
@@ -38,6 +42,10 @@ class RAGResult:
     queries: list[str] = field(default_factory=list)
     retries: int = 0
     abstained: bool = False
+    standalone_question: str | None = None
+    """The rewritten question used for retrieval, when chat history changed it."""
+    context_tokens: int = 0
+    """Tokens of retrieved context sent to the LLM, measured with the configured counter."""
 
     @property
     def sources(self) -> list[str]:
@@ -53,6 +61,8 @@ class RAGResult:
             "queries": self.queries,
             "retries": self.retries,
             "abstained": self.abstained,
+            "standalone_question": self.standalone_question,
+            "context_tokens": self.context_tokens,
             "documents": [
                 {"content": doc.page_content, "metadata": doc.metadata} for doc in self.documents
             ],
@@ -64,7 +74,8 @@ class RAGPipeline:
 
     Components are created on first use, so ingest-only processes never build an LLM. Any
     LangChain-compatible ``llm``, ``embeddings`` or ``vector_store`` passed here replaces the
-    configured one.
+    configured one. ``token_counter`` replaces ``context_window.token_counter`` with any function
+    that returns the token count of a string, such as one built from your model's tokenizer.
     """
 
     def __init__(
@@ -75,8 +86,10 @@ class RAGPipeline:
         embeddings: Embeddings | None = None,
         vector_store: VectorStore | None = None,
         reranker: Reranker | None = None,
+        token_counter: TokenCounter | None = None,
     ) -> None:
         self.config = config or RAGConfig()
+        self._token_counter = token_counter
         self._llm = llm
         self._embeddings = embeddings
         self._vector_store = vector_store
@@ -153,14 +166,21 @@ class RAGPipeline:
         bm25 = BM25Index(self.chunk_store) if settings.hybrid.enabled else None
         return Retriever(self.index, settings, bm25)
 
+    @cached_property
+    def token_counter(self) -> TokenCounter:
+        if self._token_counter is not None:
+            return self._token_counter
+        return build_token_counter(self.config.context_window)
+
     def _components(self) -> QueryComponents:
-        settings = self.config.retrieval
-        needs_llm = bool(settings.query_transform.strategies) or settings.corrective.enabled
+        # The LLM is built only when a stage first needs it, so retrieval without chat history,
+        # transforms or grading works with no LLM configured.
         return QueryComponents(
             config=self.config,
             retriever=self.retriever,
-            llm=self.llm if needs_llm else None,
+            llm=lambda: self.llm,
             reranker=self.reranker,
+            token_counter=self.token_counter,
         )
 
     @cached_property
@@ -171,9 +191,7 @@ class RAGPipeline:
 
     @cached_property
     def _answer_graph(self) -> Any:
-        components = self._components()
-        components.llm = self.llm
-        return build_query_graph(components)
+        return build_query_graph(self._components())
 
     @cached_property
     def _retrieval_graph(self) -> Any:
@@ -206,9 +224,16 @@ class RAGPipeline:
         """Return indexed sources and their chunk counts."""
         return self.chunk_store.sources()
 
-    def delete_source(self, source: str) -> int:
-        """Remove a source from the index and return the number of chunks deleted."""
-        ids = sorted(self.chunk_store.ids_for_source(source))
+    def delete_source(self, source: str | Path) -> int:
+        """Remove a source from the index and return the number of chunks deleted.
+
+        File paths may be relative or absolute, as with :meth:`ingest`; URLs must match exactly.
+        """
+        name = str(source)
+        found = self.chunk_store.ids_for_source(name)
+        if not found and not name.startswith(("http://", "https://")):
+            found = self.chunk_store.ids_for_source(str(Path(name).expanduser().resolve()))
+        ids = sorted(found)
         for start in range(0, len(ids), self.config.batch_size):
             batch = ids[start : start + self.config.batch_size]
             self.index.delete(batch)
@@ -217,11 +242,22 @@ class RAGPipeline:
 
     # --------------------------------------------------------------------- queries
     @staticmethod
-    def _input(question: str, where: dict[str, Any] | None, top_k: int | None) -> dict[str, Any]:
-        return {"question": question, "where": where, "top_k": top_k}
+    def _input(
+        question: str,
+        where: dict[str, Any] | None,
+        top_k: int | None,
+        history: HistoryInput | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "question": question,
+            "where": where,
+            "top_k": top_k,
+            "history": normalize_history(history),
+        }
 
     @staticmethod
     def _result(question: str, state: dict[str, Any]) -> RAGResult:
+        standalone = state.get("search_question")
         return RAGResult(
             question=question,
             answer=state.get("answer", ""),
@@ -229,42 +265,69 @@ class RAGPipeline:
             queries=state.get("all_queries", []),
             retries=state.get("retries", 0),
             abstained=state.get("abstained", False),
+            standalone_question=standalone if standalone and standalone != question else None,
+            context_tokens=state.get("context_tokens", 0),
         )
 
     def retrieve(
-        self, question: str, *, where: dict[str, Any] | None = None, top_k: int | None = None
+        self,
+        question: str,
+        *,
+        where: dict[str, Any] | None = None,
+        top_k: int | None = None,
+        history: HistoryInput | None = None,
     ) -> list[Document]:
         """Run the retrieval stages without generating an answer."""
         state = self._retrieval_graph.invoke(
-            self._input(question, where, top_k), config=self._run_config("retrieve")
+            self._input(question, where, top_k, history), config=self._run_config("retrieve")
         )
         limit = top_k or self.config.retrieval.top_k
         return state["documents"][:limit]
 
     def query(
-        self, question: str, *, where: dict[str, Any] | None = None, top_k: int | None = None
+        self,
+        question: str,
+        *,
+        where: dict[str, Any] | None = None,
+        top_k: int | None = None,
+        history: HistoryInput | None = None,
     ) -> RAGResult:
-        """Answer a question. ``where`` restricts results by exact metadata values."""
+        """Answer a question.
+
+        ``where`` restricts results by exact metadata values. ``history`` is the conversation so
+        far; follow-up questions are rewritten using it, and its most recent turns are sent to the
+        LLM, as set in ``context_window``. :meth:`chat` keeps the history for you.
+        """
         state = self._answer_graph.invoke(
-            self._input(question, where, top_k), config=self._run_config("query")
+            self._input(question, where, top_k, history), config=self._run_config("query")
         )
         return self._result(question, state)
 
     async def aquery(
-        self, question: str, *, where: dict[str, Any] | None = None, top_k: int | None = None
+        self,
+        question: str,
+        *,
+        where: dict[str, Any] | None = None,
+        top_k: int | None = None,
+        history: HistoryInput | None = None,
     ) -> RAGResult:
         """Async form of :meth:`query`."""
         state = await self._answer_graph.ainvoke(
-            self._input(question, where, top_k), config=self._run_config("query")
+            self._input(question, where, top_k, history), config=self._run_config("query")
         )
         return self._result(question, state)
 
     def stream(
-        self, question: str, *, where: dict[str, Any] | None = None, top_k: int | None = None
+        self,
+        question: str,
+        *,
+        where: dict[str, Any] | None = None,
+        top_k: int | None = None,
+        history: HistoryInput | None = None,
     ) -> Iterator[str]:
         """Yield answer text as it is generated."""
         events = self._answer_graph.stream(
-            self._input(question, where, top_k),
+            self._input(question, where, top_k, history),
             config=self._run_config("stream"),
             stream_mode=["messages", "updates"],
         )
@@ -274,11 +337,16 @@ class RAGPipeline:
                 yield text
 
     async def astream(
-        self, question: str, *, where: dict[str, Any] | None = None, top_k: int | None = None
+        self,
+        question: str,
+        *,
+        where: dict[str, Any] | None = None,
+        top_k: int | None = None,
+        history: HistoryInput | None = None,
     ) -> AsyncIterator[str]:
         """Async form of :meth:`stream`."""
         events = self._answer_graph.astream(
-            self._input(question, where, top_k),
+            self._input(question, where, top_k, history),
             config=self._run_config("stream"),
             stream_mode=["messages", "updates"],
         )
@@ -286,6 +354,15 @@ class RAGPipeline:
             text = _stream_text(mode, payload)
             if text:
                 yield text
+
+    def chat(self, history: HistoryInput | None = None) -> ChatSession:
+        """Start a conversation that remembers its own history.
+
+        Pass ``history`` to resume a conversation saved with :meth:`ChatSession.to_dicts`.
+        """
+        from .chat import ChatSession
+
+        return ChatSession(self, history)
 
     # ------------------------------------------------------------------ evaluation
     def evaluate(

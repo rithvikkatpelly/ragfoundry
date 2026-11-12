@@ -1,21 +1,30 @@
-"""Query workflow: transform, retrieve, rerank, grade and generate."""
+"""Query workflow: condense, transform, retrieve, rerank, grade and generate."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from .._utils import message_text
 from ..config import RAGConfig
+from ..context import (
+    TokenCounter,
+    approximate_tokens,
+    format_context,
+    pack_documents,
+    render_history,
+    window_history,
+)
 from ..prompts import (
+    CONDENSE_QUESTION_PROMPT,
     CORRECTIVE_REWRITE_PROMPT,
     DEFAULT_SYSTEM_PROMPT,
     GENERATION_PROMPT,
@@ -29,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 class QueryState(TypedDict, total=False):
     question: str
+    history: list[BaseMessage]
+    search_question: str
     where: dict[str, Any] | None
     top_k: int | None
     queries: list[str]
@@ -39,22 +50,16 @@ class QueryState(TypedDict, total=False):
     retries: int
     answer: str
     abstained: bool
+    context_tokens: int
 
 
 @dataclass
 class QueryComponents:
     config: RAGConfig
     retriever: Retriever
-    llm: BaseChatModel | None = None
+    llm: Callable[[], BaseChatModel] | None = None
     reranker: Reranker | None = None
-
-
-def format_context(documents: Sequence[Document]) -> str:
-    blocks = []
-    for number, document in enumerate(documents, start=1):
-        source = document.metadata.get("source", "unknown")
-        blocks.append(f"[{number}] (source: {source})\n{document.page_content}")
-    return "\n\n".join(blocks)
+    token_counter: TokenCounter = field(default=approximate_tokens)
 
 
 def build_query_graph(components: QueryComponents, generate_answer: bool = True) -> Any:
@@ -65,23 +70,46 @@ def build_query_graph(components: QueryComponents, generate_answer: bool = True)
     """
     config = components.config
     settings = config.retrieval
+    window = config.context_window
+    count = components.token_counter
     corrective = settings.corrective.enabled
     transforms = bool(settings.query_transform.strategies)
 
     def need_llm() -> BaseChatModel:
         if components.llm is None:
             raise ValueError("This pipeline step requires an LLM")
-        return components.llm
+        return components.llm()
 
     def limit(state: QueryState) -> int:
         return state.get("top_k") or settings.top_k
 
     def prepare(state: QueryState) -> QueryState:
         question = state["question"]
-        return {"queries": [question], "vector_only": [], "all_queries": [question], "retries": 0}
+        history = window_history(
+            state.get("history") or [], window.max_history_turns, window.max_history_tokens, count
+        )
+        return {
+            "history": history,
+            "search_question": question,
+            "queries": [question],
+            "vector_only": [],
+            "all_queries": [question],
+            "retries": 0,
+        }
+
+    def condense(state: QueryState, config: RunnableConfig) -> QueryState:
+        if not state["history"]:
+            return {}
+        prompt = CONDENSE_QUESTION_PROMPT.format(
+            history=render_history(state["history"]), question=state["question"]
+        )
+        standalone = message_text(need_llm().invoke(prompt, config=config)) or state["question"]
+        return {"search_question": standalone, "queries": [standalone], "all_queries": [standalone]}
 
     def transform(state: QueryState, config: RunnableConfig) -> QueryState:
-        result = transform_query(state["question"], need_llm(), settings.query_transform, config)
+        result = transform_query(
+            state["search_question"], need_llm(), settings.query_transform, config
+        )
         return {
             "queries": result.queries,
             "vector_only": result.vector_only,
@@ -103,7 +131,7 @@ def build_query_graph(components: QueryComponents, generate_answer: bool = True)
         assert components.reranker is not None
         return {
             "documents": components.reranker.rerank(
-                state["question"], state["documents"], limit(state)
+                state["search_question"], state["documents"], limit(state)
             )
         }
 
@@ -112,7 +140,7 @@ def build_query_graph(components: QueryComponents, generate_answer: bool = True)
         kept = {doc_key(doc): doc for doc in state.get("relevant", [])}
         if documents:
             prompts: list[LanguageModelInput] = [
-                GRADE_PROMPT.format(question=state["question"], passage=doc.page_content)
+                GRADE_PROMPT.format(question=state["search_question"], passage=doc.page_content)
                 for doc in documents
             ]
             for doc, reply in zip(documents, need_llm().batch(prompts, config=config), strict=True):
@@ -133,9 +161,9 @@ def build_query_graph(components: QueryComponents, generate_answer: bool = True)
 
     def rewrite(state: QueryState, config: RunnableConfig) -> QueryState:
         prompt = CORRECTIVE_REWRITE_PROMPT.format(
-            question=state["question"], previous="; ".join(state["all_queries"])
+            question=state["search_question"], previous="; ".join(state["all_queries"])
         )
-        query = message_text(need_llm().invoke(prompt, config=config)) or state["question"]
+        query = message_text(need_llm().invoke(prompt, config=config)) or state["search_question"]
         return {
             "queries": [query],
             "vector_only": [],
@@ -150,13 +178,25 @@ def build_query_graph(components: QueryComponents, generate_answer: bool = True)
 
     def generate(state: QueryState, config: RunnableConfig) -> QueryState:
         system = components.config.generation.system_prompt or DEFAULT_SYSTEM_PROMPT
-        documents = state["documents"][: limit(state)]
-        human = GENERATION_PROMPT.format(
-            context=format_context(documents), question=state["question"]
+        packed = pack_documents(
+            state["documents"][: limit(state)],
+            window.max_context_tokens,
+            count,
+            truncate_last=window.truncate_last_passage,
         )
-        messages = [SystemMessage(content=system), HumanMessage(content=human)]
+        if packed.dropped:
+            logger.debug("Context budget left out %d passage(s)", packed.dropped)
+        human = GENERATION_PROMPT.format(
+            context=format_context(packed.documents), question=state["question"]
+        )
+        messages = [SystemMessage(content=system), *state["history"], HumanMessage(content=human)]
         reply = need_llm().invoke(messages, config=config)
-        return {"answer": message_text(reply), "documents": documents, "abstained": False}
+        return {
+            "answer": message_text(reply),
+            "documents": packed.documents,
+            "abstained": False,
+            "context_tokens": packed.tokens,
+        }
 
     def abstain(state: QueryState) -> QueryState:
         return {"answer": components.config.generation.abstain_message, "abstained": True}
@@ -166,12 +206,17 @@ def build_query_graph(components: QueryComponents, generate_answer: bool = True)
     graph.add_node("retrieve", retrieve)
     graph.add_edge(START, "prepare")
 
+    before_retrieval = "prepare"
+    if window.condense_question and window.max_history_turns > 0:
+        graph.add_node("condense", condense)
+        graph.add_edge("prepare", "condense")
+        before_retrieval = "condense"
     if transforms:
         graph.add_node("transform", transform)
-        graph.add_edge("prepare", "transform")
+        graph.add_edge(before_retrieval, "transform")
         graph.add_edge("transform", "retrieve")
     else:
-        graph.add_edge("prepare", "retrieve")
+        graph.add_edge(before_retrieval, "retrieve")
 
     last_stage = "retrieve"
     if components.reranker:

@@ -51,6 +51,16 @@ different search query using other terms or a broader framing. Reply with only t
 Question: {question}
 Previous queries: {previous}"""
 
+CONDENSE_QUESTION_PROMPT = """Rewrite the follow-up question so it can be understood without the \
+conversation, replacing words such as "it", "they" or "that" with what they refer to. Keep every \
+specific name and number. If the question already stands on its own, return it unchanged. Reply \
+with only the question.
+
+Conversation:
+{history}
+
+Follow-up question: {question}"""
+
 EXTRACT_CLAIMS_PROMPT = """List the distinct factual claims made in this answer to the question. \
 Write each claim as a complete, standalone sentence, using the question to fill in what a short \
 answer leaves implicit. Reply with a JSON array of strings only, or [] if there are no claims.

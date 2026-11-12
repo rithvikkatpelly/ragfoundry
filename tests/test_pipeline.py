@@ -58,6 +58,7 @@ def test_reingest_is_incremental_and_removes_stale_chunks(tmp_path, corpus):
         assert reopened.retrieve("sourdough starter")[0].metadata["source"].endswith("baking.txt")
         removed = reopened.delete_source(str(corpus / "baking.txt"))
         assert removed == 1
+        assert reopened.delete_source(str(corpus / "baking.txt")) == 0
         assert not any("baking" in s for s in reopened.sources())
 
 
@@ -217,3 +218,11 @@ def test_missing_components_explain_themselves(tmp_path):
         _ = pipeline.llm
     with pytest.raises(ConfigurationError, match="No vector store configured"):
         _ = pipeline.index
+
+
+def test_delete_source_accepts_relative_paths(tmp_path, corpus, monkeypatch):
+    with make_pipeline(tmp_path) as pipeline:
+        pipeline.ingest(corpus)
+        monkeypatch.chdir(corpus)
+        assert pipeline.delete_source("solar.md") == 1
+        assert not any(s.endswith("solar.md") for s in pipeline.sources())

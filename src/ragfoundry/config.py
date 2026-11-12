@@ -28,7 +28,7 @@ class WebConfig(_Model):
     delay_seconds: float = Field(0.5, ge=0)
     timeout_seconds: float = Field(30, gt=0)
     max_bytes: int = Field(10_000_000, gt=0)
-    user_agent: str = "ragfoundry/0.1"
+    user_agent: str = "ragfoundry/0.2"
 
 
 class LoadingConfig(_Model):
@@ -184,6 +184,30 @@ class RetrievalConfig(_Model):
         return self
 
 
+class ContextWindowConfig(_Model):
+    """Limits on what goes into the generation prompt."""
+
+    max_context_tokens: int | None = Field(
+        None, gt=0, description="Token budget for retrieved passages; unset sends all top_k."
+    )
+    truncate_last_passage: bool = Field(
+        True, description="Shorten the passage that crosses the budget instead of dropping it."
+    )
+    max_history_turns: int = Field(
+        5, ge=0, description="Recent user questions, with their answers, sent to the LLM."
+    )
+    max_history_tokens: int | None = Field(
+        None, gt=0, description="Token budget for chat history; older turns are dropped first."
+    )
+    condense_question: bool = Field(
+        True, description="Rewrite follow-up questions into standalone ones before retrieval."
+    )
+    token_counter: Literal["approximate", "tiktoken"] = Field(
+        "approximate", description="approximate is 4 characters per token; tiktoken is exact."
+    )
+    encoding_name: str = Field("cl100k_base", description="tiktoken encoding to count with.")
+
+
 class GenerationConfig(_Model):
     system_prompt: str | None = Field(None, description="Replaces the default system prompt.")
     abstain_message: str = "I don't have enough information in the provided documents to answer."
@@ -217,6 +241,7 @@ class RAGConfig(_Model):
     llm: LLMConfig | None = None
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    context_window: ContextWindowConfig = Field(default_factory=ContextWindowConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
 

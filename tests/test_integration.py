@@ -194,3 +194,25 @@ def test_ragas_backend(tmp_path, corpus):
     print("\nRAGAS:", report.summary, report.rows[0].get("generation_metrics"))
     assert report.summary, "RAGAS returned no metrics"
     assert any(stats["count"] == 1 for stats in report.summary.values())
+
+
+@pytest.mark.skipif(not _ollama_ready(), reason=f"Ollama model {OLLAMA_MODEL} not available")
+def test_ollama_chat_follow_up_and_context_budget(tmp_path, corpus):
+    config = RAGConfig.model_validate(
+        {
+            "persist_dir": str(tmp_path),
+            "vector_store": {"provider": "chroma"},
+            "llm": _ollama_llm(),
+            "context_window": {"max_context_tokens": 120, "max_history_turns": 3},
+        }
+    )
+    with RAGPipeline(config, embeddings=KeywordEmbeddings()) as rag:
+        rag.ingest(corpus)
+        chat = rag.chat()
+        chat.ask("What do solar panels do?")
+        follow_up = chat.ask("And how efficient are they?")
+        assert follow_up.standalone_question is not None
+        assert "solar" in follow_up.standalone_question.lower()
+        assert follow_up.sources[0].endswith("solar.md")
+        assert "20" in follow_up.answer
+        assert 0 < follow_up.context_tokens <= 120

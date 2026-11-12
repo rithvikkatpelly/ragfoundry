@@ -1,2 +1,4 @@
 {"question": "How efficient are silicon solar cells?", "reference_answer": "About 20 percent.", "relevant_sources": ["solar.md"]}
 {"question": "What does a sourdough starter need?", "reference_answer": "Regular feeding with flour and water.", "reference_contexts": ["needs regular feeding with flour and water"]}
+{"question": "What water temperature is best for brewing coffee?", "reference_answer": "90 to 96 degrees Celsius.", "relevant_sources": ["coffee.txt"]}
+{"question": "How much does the brake caliper cost?", "reference_answer": "89 US dollars.", "relevant_sources": ["parts.csv"]}

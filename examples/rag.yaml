@@ -1,4 +1,5 @@
 # Full ragfoundry configuration with every section. Values shown are the defaults unless marked.
+# Load it with RAGPipeline.from_yaml("rag.yaml"). ${VAR} and ${VAR:-default} read the environment.
 persist_dir: .ragfoundry
 batch_size: 64
 
@@ -41,11 +42,11 @@ vector_store:              # required; pick one provider block
   # pgvector: connection: postgresql+psycopg://user:pass@localhost:5432/db
 
 llm:                       # required for answers; not needed for ingest-only use
-  provider: ollama         # groq | openai | gemini | claude | ollama
-  model: llama3.2
-  # temperature: 0
+  provider: groq           # groq | openai | gemini | claude | ollama        (marked: example)
+  model: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+  temperature: 0
   # max_tokens: 1024
-  # api_key: ${GROQ_API_KEY}
+  # api_key: ${GROQ_API_KEY}   # optional: each SDK also reads its own environment variable
   # base_url: http://localhost:11434
   # options: {}           # passed to the LangChain chat model class
 
@@ -67,6 +68,15 @@ retrieval:
     enabled: false
     max_retries: 1
     min_relevant_docs: 1
+
+context_window:
+  max_context_tokens: 4000               # (marked: example) budget for retrieved passages; default unset = no limit
+  truncate_last_passage: true            # shorten the passage that crosses the budget
+  max_history_turns: 5                   # chat turns sent with each question
+  # max_history_tokens: 2000             # also cap history by tokens
+  condense_question: true                # rewrite follow-ups into standalone search queries
+  token_counter: approximate             # approximate (4 chars/token) | tiktoken (needs "tokens" extra)
+  encoding_name: cl100k_base
 
 generation:
   # system_prompt: "..."                 # replaces the default prompt
