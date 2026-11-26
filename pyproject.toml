@@ -70,10 +70,12 @@ all = [
   "ragfoundry[chroma,faiss,pinecone,qdrant,weaviate,milvus,pgvector]",
   "ragfoundry[cohere,ragas,langsmith,langfuse]",
 ]
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=0.26"]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.10", "reportlab>=4", "python-docx>=1.1"]
 
 [project.urls]
 Homepage = "https://github.com/rithvikkatpelly/ragfoundry"
+Documentation = "https://rithvikkatpelly.github.io/ragfoundry/"
 Repository = "https://github.com/rithvikkatpelly/ragfoundry"
 Issues = "https://github.com/rithvikkatpelly/ragfoundry/issues"
 Changelog = "https://github.com/rithvikkatpelly/ragfoundry/blob/main/CHANGELOG.md"

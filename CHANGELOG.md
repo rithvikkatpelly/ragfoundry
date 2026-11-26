@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Documentation website at https://rithvikkatpelly.github.io/ragfoundry/ with a beginner guide,
+  tutorials, a page for every integration, how-to guides and an API reference.
+- Corrected the explanation of when the pipeline abstains.
+
 ## 0.2.0
 
 ### Added

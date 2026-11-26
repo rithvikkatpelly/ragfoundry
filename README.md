@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/ragfoundry)](https://pypi.org/project/ragfoundry/)
 [![Python](https://img.shields.io/pypi/pyversions/ragfoundry)](https://pypi.org/project/ragfoundry/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-website-indigo)](https://rithvikkatpelly.github.io/ragfoundry/)
 
 Production RAG pipelines from a single configuration. ragfoundry wires LangChain components into
 LangGraph workflows, covering everything from document loading to chat, evaluation and tracing, so
@@ -32,6 +33,10 @@ print(rag.query("What is the refund policy?").answer)
 | Context window | Token budget for retrieved passages and for chat history |
 | Evaluation | Retrieval: hit rate, precision, recall, MRR, MAP, nDCG. Generation: faithfulness, answer relevance, answer correctness, context relevance, context recall. Optional RAGAS backend |
 | Observability | LangSmith or Langfuse |
+
+> **New to RAG?** The [documentation website](https://rithvikkatpelly.github.io/ragfoundry/) has a
+> step-by-step beginner guide, complete tutorials, and a page for every loader, embedding model,
+> vector store and LLM.
 
 ## Contents
 
@@ -421,7 +426,7 @@ result = rag.query("What is the refund policy?")
 | `documents` | The passages sent to the LLM, as LangChain `Document`s with metadata |
 | `queries` | Every search query used (more than one with query transforms or retries) |
 | `retries` | Rounds of the corrective loop |
-| `abstained` | `True` when nothing relevant was found and the abstain message was returned |
+| `abstained` | `True` when no passages were left to answer from and the abstain message was returned |
 | `standalone_question` | The rewritten question used for search, when chat history changed it |
 | `context_tokens` | Tokens of retrieved context sent to the LLM |
 
@@ -456,8 +461,10 @@ for doc in rag.retrieve("refund timelines", top_k=3):
 
 **Async** versions for web servers: `await rag.aquery(...)` and `async for token in rag.astream(...)`.
 
-If no relevant passages are found, the answer is `generation.abstain_message`, `abstained` is
-`True`, and the LLM is not asked to answer from nothing.
+The LLM is told to answer only from the passages and to say plainly when they don't contain the
+answer. If no passages are left at all (nothing indexed, a filter that matches nothing, or
+corrective retrieval rejecting every passage), the answer is `generation.abstain_message`,
+`abstained` is `True`, and the LLM isn't called.
 
 ## 11. Chat and conversation history
 
@@ -1014,7 +1021,7 @@ prepare → [condense] → [transform] → retrieve → [rerank] → [grade ⇄ 
 - **grade / rewrite** is the corrective loop.
 - **generate** packs passages into the context budget and sends the system prompt, the history
   window, the passages and the original question to the LLM.
-- **abstain** returns the abstain message without calling the LLM when nothing relevant was found.
+- **abstain** returns the abstain message without calling the LLM when no passages are left.
 
 Search stages use the standalone question; generation uses the user's own wording.
 

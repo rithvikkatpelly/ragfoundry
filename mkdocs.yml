@@ -1,0 +1,172 @@
+site_name: ragfoundry
+site_description: Build production RAG pipelines in Python with a single configuration.
+site_url: https://rithvikkatpelly.github.io/ragfoundry/
+repo_url: https://github.com/rithvikkatpelly/ragfoundry
+repo_name: rithvikkatpelly/ragfoundry
+edit_uri: edit/main/docs/
+copyright: MIT License
+
+theme:
+  name: material
+  icon:
+    logo: material/book-open-page-variant
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle: {icon: material/weather-night, name: Switch to dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle: {icon: material/weather-sunny, name: Switch to light mode}
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - toc.follow
+
+extra_css:
+  - assets/extra.css
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            docstring_style: sphinx
+            separate_signature: true
+            show_signature_annotations: true
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - def_list
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Get started:
+      - get-started/index.md
+      - What is RAG?: get-started/what-is-rag.md
+      - Installation: get-started/installation.md
+      - API keys: get-started/api-keys.md
+      - Your first RAG pipeline: get-started/first-pipeline.md
+      - Core concepts: get-started/concepts.md
+      - Choosing components: get-started/choosing-components.md
+  - Tutorials:
+      - tutorials/index.md
+      - Chat with a PDF: tutorials/chat-with-pdf.md
+      - Fully local RAG with Ollama: tutorials/local-rag.md
+      - Streamlit chat app: tutorials/streamlit-app.md
+      - Question answering over a website: tutorials/website-qa.md
+      - Chatbot API with FastAPI: tutorials/fastapi-chatbot.md
+      - Evaluate and improve your RAG: tutorials/evaluate-and-improve.md
+  - How-to guides:
+      - how-to/index.md
+      - Configure with Python or YAML: how-to/configuration.md
+      - Load documents: how-to/loading-documents.md
+      - Choose chunk size: how-to/chunk-size.md
+      - Chat with history: how-to/chat-history.md
+      - Limit the context window: how-to/context-window.md
+      - Hybrid search: how-to/hybrid-search.md
+      - Reranking: how-to/reranking.md
+      - Query transforms: how-to/query-transforms.md
+      - Corrective retrieval: how-to/corrective-retrieval.md
+      - Metadata filters: how-to/metadata-filters.md
+      - Streaming and async: how-to/streaming-async.md
+      - Keep the index up to date: how-to/managing-the-index.md
+      - Customise the prompt: how-to/prompts.md
+      - Evaluate quality: how-to/evaluation.md
+      - Trace with LangSmith or Langfuse: how-to/tracing.md
+      - Custom components: how-to/custom-components.md
+      - Go to production: how-to/production.md
+  - Integrations:
+      - integrations/index.md
+      - Document loaders:
+          - integrations/loaders/index.md
+          - PDF: integrations/loaders/pdf.md
+          - Word (DOCX): integrations/loaders/docx.md
+          - Text and Markdown: integrations/loaders/text.md
+          - CSV: integrations/loaders/csv.md
+          - Excel: integrations/loaders/excel.md
+          - Web pages: integrations/loaders/web.md
+      - Chunking strategies:
+          - integrations/chunking/index.md
+          - Fixed: integrations/chunking/fixed.md
+          - Recursive: integrations/chunking/recursive.md
+          - Semantic: integrations/chunking/semantic.md
+          - LLM: integrations/chunking/llm.md
+      - Embedding models:
+          - integrations/embeddings/index.md
+          - Hugging Face: integrations/embeddings/huggingface.md
+          - OpenAI: integrations/embeddings/openai.md
+          - Gemini: integrations/embeddings/gemini.md
+      - Vector stores:
+          - integrations/vector-stores/index.md
+          - Chroma: integrations/vector-stores/chroma.md
+          - FAISS: integrations/vector-stores/faiss.md
+          - Pinecone: integrations/vector-stores/pinecone.md
+          - Qdrant: integrations/vector-stores/qdrant.md
+          - Weaviate: integrations/vector-stores/weaviate.md
+          - Milvus: integrations/vector-stores/milvus.md
+          - PGVector: integrations/vector-stores/pgvector.md
+      - Chat models (LLMs):
+          - integrations/llms/index.md
+          - Groq: integrations/llms/groq.md
+          - OpenAI: integrations/llms/openai.md
+          - Gemini: integrations/llms/gemini.md
+          - Claude: integrations/llms/claude.md
+          - Ollama: integrations/llms/ollama.md
+      - Rerankers:
+          - integrations/rerankers/index.md
+          - Hugging Face cross-encoder: integrations/rerankers/huggingface.md
+          - Cohere: integrations/rerankers/cohere.md
+      - Observability:
+          - integrations/observability/index.md
+          - LangSmith: integrations/observability/langsmith.md
+          - Langfuse: integrations/observability/langfuse.md
+  - Reference:
+      - reference/index.md
+      - Configuration: reference/configuration.md
+      - Python API: reference/api.md
+      - Troubleshooting: reference/troubleshooting.md
+      - FAQ: reference/faq.md
+      - Changelog: reference/changelog.md
